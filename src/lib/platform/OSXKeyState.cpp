@@ -784,10 +784,10 @@ bool OSXKeyState::map_hot_key_to_mac(KeyID key, KeyModifierMask mask,
         macModifierMask |= controlKey;
     }
     if ((mask & KeyModifierAlt) != 0) {
-        macModifierMask |= cmdKey;
+        macModifierMask |= optionKey;
     }
     if ((mask & KeyModifierSuper) != 0) {
-        macModifierMask |= optionKey;
+        macModifierMask |= cmdKey;
     }
     if ((mask & KeyModifierCapsLock) != 0) {
         macModifierMask |= alphaLock;
