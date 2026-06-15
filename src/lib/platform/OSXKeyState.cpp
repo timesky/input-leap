@@ -106,8 +106,6 @@ static const KeyEntry    s_controlKeys[] = {
     { kKeyAlt_R,             kVK_RightOption }, // 61
     { kKeySuper_L,               kVK_Command }, // 55
     { kKeySuper_R,          kVK_RightCommand }, // 54
-    { kKeyMeta_L,                kVK_Command }, // 55
-    { kKeyMeta_R,           kVK_RightCommand }, // 54
 
     // toggle modifiers
     { kKeyNumLock,      kVK_ANSI_KeypadClear },
@@ -788,6 +786,9 @@ bool OSXKeyState::map_hot_key_to_mac(KeyID key, KeyModifierMask mask,
     }
     if ((mask & KeyModifierSuper) != 0) {
         macModifierMask |= cmdKey;
+    }
+    if ((mask & KeyModifierMeta) != 0) {
+        macModifierMask |= cmdKey;  // Meta maps to Command on macOS
     }
     if ((mask & KeyModifierCapsLock) != 0) {
         macModifierMask |= alphaLock;

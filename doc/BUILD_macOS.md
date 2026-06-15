@@ -318,6 +318,29 @@ lipo -archs build-universal/bin/input-leaps
 -DCMAKE_PREFIX_PATH="/opt/homebrew"
 ```
 
+### Q: Qt 框架部署问题 (Library not loaded: @rpath/Qt*.framework)
+
+**A:** 使用官方 Qt 安装而非 Homebrew Qt，避免框架依赖问题：
+
+```bash
+# 1. 卸载 Homebrew Qt (如果已安装)
+brew uninstall qt
+
+# 2. 使用 aqtinstall 安装官方 Qt
+pip3 install aqtinstall
+aqt install-qt mac desktop 6.9.0 clang_64 -O ~/Qt
+
+# 3. 构建时指定官方 Qt 路径
+cmake -DCMAKE_PREFIX_PATH="$HOME/Qt/6.9.0/macos" ..
+
+# 4. 构建后使用官方 macdeployqt 部署框架
+~/Qt/6.9.0/macos/bin/macdeployqt build/bundle/InputLeap.app \
+  -executable=build/bundle/InputLeap.app/Contents/MacOS/input-leapc \
+  -executable=build/bundle/InputLeap.app/Contents/MacOS/input-leaps
+```
+
+**原因：** Homebrew Qt 可能缺少某些框架 (如 QtDBus)，或版本不匹配导致运行时找不到库。
+
 ### Q: 链接错误: library 'c++' not found
 
 **A:** 这是 macOS 26 SDK 的问题。使用较旧的 SDK：
