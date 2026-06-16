@@ -373,6 +373,15 @@ void MainWindow::set_icon(AppConnectionState state)
 
 void MainWindow::trayActivated(QSystemTrayIcon::ActivationReason reason)
 {
+    // On macOS, show the context menu on left-click (Trigger) as well
+    // Right-click (Context) automatically shows the menu via setContextMenu
+#if defined(Q_OS_DARWIN)
+    if (reason == QSystemTrayIcon::Trigger) {
+        m_pTrayIconMenu->popup(QCursor::pos());
+        return;
+    }
+#endif
+
     if (reason == QSystemTrayIcon::DoubleClick)
     {
         if (isVisible())

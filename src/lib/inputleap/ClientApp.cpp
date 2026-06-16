@@ -32,6 +32,7 @@
 #include "mt/Thread.h"
 #include "arch/IArchTaskBarReceiver.h"
 #include "arch/Arch.h"
+#include "arch/XArch.h"
 #include "base/String.h"
 #include "base/Event.h"
 #include "base/EventQueueTimer.h"
@@ -283,13 +284,35 @@ void ClientApp::handle_client_failed(const Event& e)
 {
     const auto& info = e.get_data_as<Client::FailInfo>();
 
-    updateStatus(std::string("Failed to connect to server: ") + info.m_what);
+    std::string errorMsg = info.m_what;
+    std::string diagnosis;
+
+    // Add detailed diagnosis for common connection errors
+    if (errorMsg.find("Connection refused") != std::string::npos) {
+        diagnosis = " [check if server is running and port is correct]";
+    }
+    else if (errorMsg.find("No route to host") != std::string::npos ||
+             errorMsg.find("Network unreachable") != std::string::npos) {
+        diagnosis = " [check network connectivity, try restarting both client and server]";
+    }
+    else if (errorMsg.find("Connection timed out") != std::string::npos ||
+             errorMsg.find("timed out") != std::string::npos) {
+        diagnosis = " [server may be unreachable or firewall blocking connection]";
+    }
+    else if (errorMsg.find("Connection reset") != std::string::npos ||
+             errorMsg.find("reset by peer") != std::string::npos) {
+        diagnosis = " [connection dropped, may need to restart server]";
+    }
+
+    std::string fullMsg = errorMsg + diagnosis;
+
+    updateStatus(std::string("Failed to connect to server: ") + fullMsg);
     if (!args().m_restartable || !info.m_retry) {
-        LOG_ERR("failed to connect to server: %s", info.m_what.c_str());
+        LOG_ERR("failed to connect to server: %s", fullMsg.c_str());
         m_events->add_event(EventType::QUIT);
     }
     else {
-        LOG_WARN("failed to connect to server: %s", info.m_what.c_str());
+        LOG_WARN("failed to connect to server: %s", fullMsg.c_str());
         if (!m_suspended) {
             scheduleClientRestart(nextRestartTimeout());
         }

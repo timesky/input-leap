@@ -34,6 +34,7 @@
 #include "net/ISocketFactory.h"
 #include "net/SecureSocket.h"
 #include "arch/Arch.h"
+#include "arch/XArch.h"
 #include "base/Log.h"
 #include "base/EventQueueTimer.h"
 #include "base/IEventQueue.h"
@@ -158,7 +159,38 @@ Client::connect()
         cleanupConnecting();
         cleanupStream();
         LOG_DEBUG1("connection failed");
-        sendConnectionFailedEvent(e.what());
+
+        // Provide detailed error diagnosis based on exception type
+        std::string errorMsg = e.what();
+        std::string diagnosis;
+
+        // Check for specific network error types
+        if (dynamic_cast<XArchNetworkNoRoute*>(&e)) {
+            diagnosis = " [Network unreachable - check if server is on the same network, "
+                       "or try restarting both client and server if problem persists]";
+        }
+        else if (dynamic_cast<XArchNetworkConnectionRefused*>(&e)) {
+            diagnosis = " [Connection refused - check if server is running and port is correct]";
+        }
+        else if (dynamic_cast<XArchNetworkTimedOut*>(&e)) {
+            diagnosis = " [Connection timed out - server may be unreachable or firewall blocking]";
+        }
+        else if (dynamic_cast<XArchNetworkNameUnknown*>(&e)) {
+            diagnosis = " [DNS resolution failed - check server hostname]";
+        }
+        else if (dynamic_cast<XArchNetworkNameNoAddress*>(&e)) {
+            diagnosis = " [No IP address for hostname - check DNS settings]";
+        }
+        else if (dynamic_cast<XArchNetworkDisconnected*>(&e)) {
+            diagnosis = " [Connection lost - network may be unstable]";
+        }
+
+        if (!diagnosis.empty()) {
+            LOG_WARN("connection error: %s%s", errorMsg.c_str(), diagnosis.c_str());
+            errorMsg += diagnosis;
+        }
+
+        sendConnectionFailedEvent(errorMsg.c_str());
         return;
     }
 }
