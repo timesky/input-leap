@@ -590,6 +590,16 @@ void MainWindow::start_cmd_app()
 
     if (desktopMode)
     {
+        // Check if a process is already running before creating a new one
+        if (cmd_app_process_ != nullptr) {
+            if (cmd_app_process_->state() == QProcess::Running) {
+                appendLogInfo("process already running, skipping start");
+                return;
+            }
+            // Clean up the old process object
+            delete cmd_app_process_;
+            cmd_app_process_ = nullptr;
+        }
         cmd_app_process_ = new QProcess(this);
     }
     else
@@ -881,18 +891,29 @@ void MainWindow::stopDesktop()
     cmd_app_process_ = nullptr;
 }
 
-void MainWindow::cmd_app_finished(int exitCode, QProcess::ExitStatus)
+void MainWindow::cmd_app_finished(int exitCode, QProcess::ExitStatus exitStatus)
 {
-    if (exitCode == 0) {
+    QString exitReason;
+    if (exitStatus == QProcess::CrashExit) {
+        exitReason = QString(" (crashed)");
+    } else if (exitCode != 0) {
+        exitReason = QString(" (exit code: %1)").arg(exitCode);
+    }
+
+    if (exitCode == 0 && exitStatus == QProcess::NormalExit) {
         appendLogInfo(QString("process exited normally"));
     }
     else {
-        appendLogError(QString("process exited with error code: %1").arg(exitCode));
+        appendLogError(QString("process exited with error%1").arg(exitReason));
     }
 
+    // Clean up the process object
+    delete cmd_app_process_;
+    cmd_app_process_ = nullptr;
+
     if (m_ExpectedRunningState == kStarted) {
+        appendLogInfo(QString("detected process not running, auto restarting in 1 second"));
         QTimer::singleShot(1000, this, &MainWindow::start_cmd_app);
-        appendLogInfo(QString("detected process not running, auto restarting"));
     }
     else {
         set_connection_state(AppConnectionState::DISCONNECTED);

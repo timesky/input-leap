@@ -307,12 +307,16 @@ void ClientApp::handle_client_failed(const Event& e)
     std::string fullMsg = errorMsg + diagnosis;
 
     updateStatus(std::string("Failed to connect to server: ") + fullMsg);
-    if (!args().m_restartable || !info.m_retry) {
-        LOG_ERR("failed to connect to server: %s", fullMsg.c_str());
+    if (!args().m_restartable) {
+        LOG_ERR("failed to connect to server: %s (not restartable)", fullMsg.c_str());
+        m_events->add_event(EventType::QUIT);
+    }
+    else if (!info.m_retry) {
+        LOG_ERR("failed to connect to server: %s (retry=false)", fullMsg.c_str());
         m_events->add_event(EventType::QUIT);
     }
     else {
-        LOG_WARN("failed to connect to server: %s", fullMsg.c_str());
+        LOG_WARN("failed to connect to server: %s (will retry)", fullMsg.c_str());
         if (!m_suspended) {
             scheduleClientRestart(nextRestartTimeout());
         }
@@ -324,10 +328,15 @@ void ClientApp::handle_client_disconnected()
 {
     LOG_NOTE("disconnected from server");
     if (!args().m_restartable) {
+        LOG_DEBUG("not restartable, sending QUIT");
         m_events->add_event(EventType::QUIT);
     }
     else if (!m_suspended) {
+        LOG_DEBUG("scheduling client restart in %.0f seconds", nextRestartTimeout());
         scheduleClientRestart(nextRestartTimeout());
+    }
+    else {
+        LOG_DEBUG("client suspended, not restarting");
     }
     updateStatus();
 }
@@ -440,6 +449,7 @@ ClientApp::stopClient()
 int
 ClientApp::mainLoop()
 {
+    LOG_DEBUG("ClientApp::mainLoop starting");
     // create socket multiplexer.  this must happen after daemonization
     // on unix because threads evaporate across a fork().
     setSocketMultiplexer(std::make_unique<SocketMultiplexer>());
@@ -460,6 +470,7 @@ ClientApp::mainLoop()
 
 #if defined(MAC_OS_X_VERSION_10_7)
 
+    LOG_DEBUG("starting event loop thread");
     Thread thread([this](){ run_events_loop(); });
 
     // wait until carbon loop is ready
@@ -467,11 +478,14 @@ ClientApp::mainLoop()
         m_clientScreen->getPlatformScreen());
     screen->waitForCarbonLoop();
 
+    LOG_DEBUG("starting cocoa app");
     runCocoaApp();
+    LOG_DEBUG("cocoa app exited");
 #else
     m_events->loop();
 #endif
 
+    LOG_DEBUG("ClientApp::mainLoop exiting");
     DAEMON_RUNNING(false);
 
     // close down

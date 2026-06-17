@@ -53,6 +53,7 @@ runCocoaApp()
 	NSLog(@"starting cocoa loop");
 	[NSApp run];
 
+	NSLog(@"cocoa loop exited");
 	NSLog(@"cocoa: release");
 	[pool release];
 }
@@ -60,6 +61,7 @@ runCocoaApp()
 void
 stopCocoaLoop()
 {
+	NSLog(@"stopCocoaLoop called");
 	[NSApp stop: g_dragWindow];
 }
 

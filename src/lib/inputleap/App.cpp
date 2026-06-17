@@ -227,10 +227,13 @@ void App::handle_ipc_message(const Event& e)
 
 void App::run_events_loop()
 {
+    LOG_DEBUG("starting event loop");
     m_events->loop();
+    LOG_DEBUG("event loop exited");
 
 #if defined(MAC_OS_X_VERSION_10_7)
 
+    LOG_DEBUG("stopping cocoa loop");
     stopCocoaLoop();
 
 #endif
