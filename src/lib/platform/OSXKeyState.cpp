@@ -574,9 +574,11 @@ void OSXKeyState::postHIDVirtualKey(const std::uint8_t virtualKeyCode, const boo
         event.key.keyCode = virtualKeyCode;
         event.key.origCharSet = event.key.charSet = NX_ASCIISET;
         event.key.origCharCode = event.key.charCode = 0;
+        // Include current modifier state so that key combinations like
+        // Shift+Tab are properly recognized by the system
         kr = IOHIDPostEvent(getEventDriver(),
                 postDown ? NX_KEYDOWN : NX_KEYUP,
-                loc, &event, kNXEventDataVersion, 0, false);
+                loc, &event, kNXEventDataVersion, modifiers, false);
         assert(KERN_SUCCESS == kr);
         break;
     }

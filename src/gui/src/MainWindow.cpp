@@ -264,7 +264,13 @@ void MainWindow::createTrayIcon()
     m_pTrayIconMenu->addAction(ui_->m_pActionQuit);
 
     m_pTrayIcon = new QSystemTrayIcon(this);
+#if defined(Q_OS_DARWIN)
+    // On macOS, don't use setContextMenu to avoid duplicate menu issues.
+    // Handle both left and right clicks in trayActivated for consistent behavior.
+    m_pTrayIcon->setContextMenu(nullptr);
+#else
     m_pTrayIcon->setContextMenu(m_pTrayIconMenu);
+#endif
     m_pTrayIcon->setToolTip("InputLeap");
 
     connect(m_pTrayIcon, &QSystemTrayIcon::activated, this, &MainWindow::trayActivated);
@@ -373,10 +379,11 @@ void MainWindow::set_icon(AppConnectionState state)
 
 void MainWindow::trayActivated(QSystemTrayIcon::ActivationReason reason)
 {
-    // On macOS, show the context menu on left-click (Trigger) as well
-    // Right-click (Context) automatically shows the menu via setContextMenu
 #if defined(Q_OS_DARWIN)
-    if (reason == QSystemTrayIcon::Trigger) {
+    // On macOS, handle both left-click (Trigger) and right-click (Context)
+    // uniformly by showing the same context menu with Quit option
+    if (reason == QSystemTrayIcon::Trigger ||
+        reason == QSystemTrayIcon::Context) {
         m_pTrayIconMenu->popup(QCursor::pos());
         return;
     }
