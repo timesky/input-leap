@@ -68,7 +68,22 @@
 #include <fstream>
 #include <sstream>
 
+#include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+
 namespace inputleap {
+
+// State shared between closeServer() and the SERVER_DISCONNECTED handler it
+// installs.  It is held by a shared_ptr because EventQueue::dispatchEvent()
+// invokes a handler without holding its lock, so the handler may still run
+// after closeServer() has stopped waiting.
+struct ClientsDisconnectedWait {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool disconnected = false;
+};
 
 ServerApp::ServerApp(IEventQueue* events, CreateTaskBarReceiverFunc createTaskBarReceiver) :
     App(events, createTaskBarReceiver, new ServerArgs()),
@@ -297,11 +312,6 @@ void ServerApp::handle_client_connected(const Event&, ClientListener* listener)
     }
 }
 
-void ServerApp::handle_clients_disconnected(const Event&)
-{
-    m_events->add_event(EventType::QUIT);
-}
-
 void
 ServerApp::closeServer(Server* server)
 {
@@ -309,21 +319,31 @@ ServerApp::closeServer(Server* server)
         return;
     }
 
+    auto wait = std::make_shared<ClientsDisconnectedWait>();
+
     // tell all clients to disconnect
     server->disconnect();
 
-    // wait for clients to disconnect for up to timeout seconds
+    // Wait for the clients to disconnect for up to timeout seconds.  We must
+    // not run a nested event loop here: on OS X the event loop already runs on
+    // its own thread and EventQueue::loop() is not reentrant.
     double timeout = 3.0;
-    EventQueueTimer* timer = m_events->newOneShotTimer(timeout, nullptr);
-    m_events->add_handler(EventType::TIMER, timer,
-                          [this](const auto& e){ handle_clients_disconnected(e); });
     m_events->add_handler(EventType::SERVER_DISCONNECTED, server,
-                          [this](const auto& e){ handle_clients_disconnected(e); });
+                          [wait](const auto& e)
+    {
+        std::lock_guard<std::mutex> lock(wait->mutex);
+        wait->disconnected = true;
+        wait->condition.notify_one();
+    });
 
-    m_events->loop();
+    {
+        std::unique_lock<std::mutex> lock(wait->mutex);
+        wait->condition.wait_for(
+            lock,
+            std::chrono::milliseconds(static_cast<int>(timeout * 1000)),
+            [&wait]{ return wait->disconnected; });
+    }
 
-    m_events->remove_handler(EventType::TIMER, timer);
-    m_events->deleteTimer(timer);
     m_events->remove_handler(EventType::SERVER_DISCONNECTED, server);
 }
 

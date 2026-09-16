@@ -22,6 +22,7 @@
 
 #include <Carbon/Carbon.h>
 
+#include <atomic>
 #include <map>
 #include <set>
 #include <vector>
@@ -125,6 +126,14 @@ private:
     // if so.
     void checkKeyboardLayout();
 
+    // Refresh m_activeGroup from the current keyboard layout.  Must only be
+    // called on the main thread: Carbon TIS/TSM is not thread safe and OS X
+    // aborts the process when two threads enter it at the same time.
+    void updateActiveGroupCache();
+
+    // Main thread run loop timer that calls updateActiveGroupCache().
+    static void activeGroupTimerCallback(CFRunLoopTimerRef timer, void* info);
+
     // Send an event for the given modifier key
     void handleModifierKey(const EventTarget* target, std::uint32_t virtualKey, KeyID id, bool down,
                            KeyModifierMask newMask);
@@ -169,6 +178,11 @@ private:
     mutable std::uint32_t m_deadKeyState;
     GroupList m_groups;
     GroupMap m_groupMap;
+
+    // The active keyboard group, cached by updateActiveGroupCache() on the
+    // main thread so that pollActiveGroup() never has to call TIS/TSM itself.
+    std::atomic<std::int32_t> m_activeGroup;
+    CFRunLoopTimerRef m_activeGroupTimer;
     bool m_shiftPressed;
     bool m_controlPressed;
     bool m_altPressed;

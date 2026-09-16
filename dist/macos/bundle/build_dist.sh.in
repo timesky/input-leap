@@ -37,19 +37,34 @@ cp -r "$B_BINDIR" "$B_MACOS" || exit 1
 
 DEPLOYQT=@QT_DEPLOY_TOOL@
 
-# Use macdeployqt to include libraries and create dmg
 if [ "$B_BUILDTYPE" = "Release" ]; then
-    info "Building Release disk image (dmg)"
-    "$DEPLOYQT" InputLeap.app -dmg \
+    B_STRIP_FLAG=""
+else
+    B_STRIP_FLAG="-no-strip"
+fi
+
+# Use macdeployqt to copy in the Qt frameworks and fix up their install names.
+# Do not pass -dmg here: the bundle has to be re-signed before it is packaged,
+# otherwise the dmg would contain an unlaunchable app.
+"$DEPLOYQT" InputLeap.app $B_STRIP_FLAG \
     -executable="$B_INPUTLEAPC" \
     -executable="$B_INPUTLEAPS" || exit 1
-    mv "InputLeap.dmg" "InputLeap-$B_VERSION.dmg" || exit 1
+
+# Re-sign the bundle.  macdeployqt rewrites the install names of the executables
+# that link Qt (only input-leap does), which invalidates the signature the linker
+# applied.  macOS refuses to execute a binary with an invalid signature - it sends
+# SIGKILL and the process dies with no output at all - so without this step the
+# GUI will not start on Apple Silicon.  There is no Developer ID here, so use an
+# ad-hoc signature.
+info "Re-signing bundle"
+codesign --force --deep --sign - InputLeap.app || exit 1
+
+if [ "$B_BUILDTYPE" = "Release" ]; then
+    info "Building Release disk image (dmg)"
+    hdiutil create -volname "InputLeap" -srcfolder InputLeap.app \
+        -ov -format UDZO "InputLeap-$B_VERSION.dmg" || exit 1
     success "Created InputLeap-$B_VERSION.dmg"
 else
     warn "Disk image (dmg) only created for Release builds"
-    info "Building debug bundle"
-    "$DEPLOYQT" InputLeap.app -no-strip \
-    -executable="$B_INPUTLEAPC" \
-    -executable="$B_INPUTLEAPS" || exit 1
     success "Bundle created successfully"
 fi

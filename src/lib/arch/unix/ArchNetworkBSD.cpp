@@ -359,19 +359,24 @@ ArchNetworkBSD::unblockPollSocket(ArchThread thread)
     }
 }
 
-size_t
+int
 ArchNetworkBSD::readSocket(ArchSocket s, void* buf, size_t len)
 {
     assert(s != nullptr);
 
-    ssize_t n = read(s->m_fd, buf, len);
+    ssize_t n;
+    do {
+        n = read(s->m_fd, buf, len);
+    } while (n == -1 && errno == EINTR);
+
     if (n == -1) {
-        if (errno == EINTR || errno == EAGAIN) {
-            return 0;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // no data available right now, but the stream is still open
+            return -1;
         }
         throwError(errno);
     }
-    return n;
+    return static_cast<int>(n);
 }
 
 size_t

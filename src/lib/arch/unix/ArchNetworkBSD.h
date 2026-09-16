@@ -73,7 +73,7 @@ public:
     bool connectSocket(ArchSocket s, ArchNetAddress name) override;
     int pollSocket(PollEntry[], int num, double timeout) override;
     void unblockPollSocket(ArchThread thread) override;
-    size_t readSocket(ArchSocket s, void* buf, size_t len) override;
+    int readSocket(ArchSocket s, void* buf, size_t len) override;
     size_t writeSocket(ArchSocket s, const void* buf, size_t len) override;
     void throwErrorOnSocket(ArchSocket) override;
     bool setNoDelayOnSocket(ArchSocket, bool noDelay) override;

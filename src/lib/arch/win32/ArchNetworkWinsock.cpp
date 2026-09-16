@@ -546,20 +546,25 @@ ArchNetworkWinsock::unblockPollSocket(ArchThread thread)
     }
 }
 
-size_t
+int
 ArchNetworkWinsock::readSocket(ArchSocket s, void* buf, size_t len)
 {
     assert(s != nullptr);
 
-    int n = recv_winsock(s->m_socket, buf, (int)len, 0);
+    int n;
+    do {
+        n = recv_winsock(s->m_socket, buf, (int)len, 0);
+    } while (n == SOCKET_ERROR && getsockerror_winsock() == WSAEINTR);
+
     if (n == SOCKET_ERROR) {
         int err = getsockerror_winsock();
-        if (err == WSAEINTR || err == WSAEWOULDBLOCK) {
-            return 0;
+        if (err == WSAEWOULDBLOCK) {
+            // no data available right now, but the stream is still open
+            return -1;
         }
         throwError(err);
     }
-    return static_cast<size_t>(n);
+    return n;
 }
 
 size_t

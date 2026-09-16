@@ -203,9 +203,11 @@ public:
     Read up to \c len bytes from socket \c s in \c buf and return the
     number of bytes read.  The number of bytes can be less than \c len
     if not enough data is available.  Returns 0 if the remote end has
-    disconnected and/or there is no more queued received data.
+    disconnected.  Returns -1 if no data is available right now (the
+    socket would block or the call was interrupted); this is not
+    end-of-stream.
     */
-    virtual size_t readSocket(ArchSocket s, void* buf, size_t len) = 0;
+    virtual int readSocket(ArchSocket s, void* buf, size_t len) = 0;
 
     //! Write data from socket
     /*!

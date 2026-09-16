@@ -174,8 +174,8 @@ void ClientListener::handle_unknown_client(ClientProxyUnknown* unknownClient)
                               [this, client](const auto& e) { handle_client_disconnected(client); });
 
         // now finished with unknown client
-        m_events->remove_handler(EventType::CLIENT_PROXY_UNKNOWN_SUCCESS, client);
-        m_events->remove_handler(EventType::CLIENT_PROXY_UNKNOWN_FAILURE, client);
+        m_events->remove_handler(EventType::CLIENT_PROXY_UNKNOWN_SUCCESS, unknownClient);
+        m_events->remove_handler(EventType::CLIENT_PROXY_UNKNOWN_FAILURE, unknownClient);
     } else {
         auto* stream = unknownClient->getStream();
         if (stream) {

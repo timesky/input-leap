@@ -322,9 +322,15 @@ TCPSocket::doRead()
 {
     std::uint8_t buffer[4096];
     memset(buffer, 0, sizeof(buffer));
-    size_t bytesRead = 0;
+    int bytesRead = 0;
 
     bytesRead = ARCH->readSocket(m_socket, buffer, sizeof(buffer));
+
+    if (bytesRead < 0) {
+        // the socket was reported readable but has no data for us right now.
+        // this is not a hangup, so try again later.
+        return kRetry;
+    }
 
     if (bytesRead > 0) {
         bool wasEmpty = (m_inputBuffer.getSize() == 0);

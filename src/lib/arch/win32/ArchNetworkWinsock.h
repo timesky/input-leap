@@ -80,7 +80,7 @@ public:
     virtual bool connectSocket(ArchSocket s, ArchNetAddress name);
     virtual int pollSocket(PollEntry[], int num, double timeout);
     virtual void unblockPollSocket(ArchThread thread);
-    virtual size_t readSocket(ArchSocket s, void* buf, size_t len);
+    virtual int readSocket(ArchSocket s, void* buf, size_t len);
     virtual size_t writeSocket(ArchSocket s,
                             const void* buf, size_t len);
     virtual void throwErrorOnSocket(ArchSocket);

@@ -71,7 +71,6 @@ public:
     void force_reconnect();
     void reset_server();
     void handle_client_connected(const Event& event, ClientListener* listener);
-    void handle_clients_disconnected(const Event&);
     void closeServer(Server* server);
     void stopRetryTimer();
     void updateStatus();

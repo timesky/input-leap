@@ -25,6 +25,7 @@
 #include <Carbon/Carbon.h>
 #include <CoreServices/CoreServices.h>
 #include <IOKit/hidsystem/IOHIDLib.h>
+#include <pthread.h>
 
 namespace inputleap {
 
@@ -128,19 +129,28 @@ static const KeyEntry    s_controlKeys[] = {
 //
 
 OSXKeyState::OSXKeyState(IEventQueue* events) :
-    KeyState(events)
+    KeyState(events),
+    m_activeGroup(0),
+    m_activeGroupTimer(nullptr)
 {
     init();
 }
 
 OSXKeyState::OSXKeyState(IEventQueue* events, inputleap::KeyMap& keyMap) :
-    KeyState(events, keyMap)
+    KeyState(events, keyMap),
+    m_activeGroup(0),
+    m_activeGroupTimer(nullptr)
 {
     init();
 }
 
 OSXKeyState::~OSXKeyState()
 {
+    if (m_activeGroupTimer != nullptr) {
+        CFRunLoopTimerInvalidate(m_activeGroupTimer);
+        CFRelease(m_activeGroupTimer);
+        m_activeGroupTimer = nullptr;
+    }
 }
 
 void
@@ -160,6 +170,56 @@ OSXKeyState::init()
         m_virtualKeyMap[s_controlKeys[i].m_virtualKey] =
             s_controlKeys[i].m_keyID;
     }
+
+    // Poll the active keyboard group on the main thread.  pollActiveGroup() is
+    // called for every key event on the event loop thread and so cannot query
+    // TIS/TSM itself: appkit queries TIS/TSM from the main thread as well, and
+    // OS X aborts the process if two threads enter it concurrently.
+    CFRunLoopTimerContext context = {};
+    context.info = this;
+    m_activeGroupTimer = CFRunLoopTimerCreate(kCFAllocatorDefault,
+                            CFAbsoluteTimeGetCurrent(), 1.0, 0, 0,
+                            &OSXKeyState::activeGroupTimerCallback, &context);
+    if (m_activeGroupTimer != nullptr) {
+        CFRunLoopAddTimer(CFRunLoopGetMain(), m_activeGroupTimer,
+                            kCFRunLoopCommonModes);
+    }
+}
+
+void
+OSXKeyState::activeGroupTimerCallback(CFRunLoopTimerRef, void* info)
+{
+    static_cast<OSXKeyState*>(info)->updateActiveGroupCache();
+}
+
+void
+OSXKeyState::updateActiveGroupCache()
+{
+    // This must only run on the main thread.  See init().
+    assert(pthread_main_np() != 0);
+
+    TISInputSourceRef keyboardLayout = TISCopyCurrentKeyboardLayoutInputSource();
+    if (keyboardLayout == nullptr) {
+        return;
+    }
+
+    CFDataRef id = (CFDataRef)TISGetInputSourceProperty(
+                        keyboardLayout, kTISPropertyInputSourceID);
+    if (id == nullptr) {
+        CFRelease(keyboardLayout);
+        return;
+    }
+
+    auto i = m_groupMap.find(id);
+    if (i != m_groupMap.end()) {
+        m_activeGroup.store(i->second, std::memory_order_relaxed);
+    }
+    else {
+        LOG_DEBUG("can't get the active group, use the first group instead");
+        m_activeGroup.store(0, std::memory_order_relaxed);
+    }
+
+    CFRelease(keyboardLayout);
 }
 
 KeyModifierMask OSXKeyState::mapModifiersFromOSX(std::uint32_t mask) const
@@ -391,18 +451,10 @@ OSXKeyState::pollActiveModifiers() const
 
 std::int32_t OSXKeyState::pollActiveGroup() const
 {
-    TISInputSourceRef keyboardLayout = TISCopyCurrentKeyboardLayoutInputSource();
-    CFDataRef id = (CFDataRef)TISGetInputSourceProperty(
-                        keyboardLayout, kTISPropertyInputSourceID);
-
-    auto i = m_groupMap.find(id);
-    if (i != m_groupMap.end()) {
-        return i->second;
-    }
-
-    LOG_DEBUG("can't get the active group, use the first group instead");
-
-    return 0;
+    // Return the group cached by the main thread timer.  Do not query TIS/TSM
+    // here: this runs on the event loop thread, and OS X aborts the process
+    // when TIS/TSM is entered from two threads at once.
+    return m_activeGroup.load(std::memory_order_relaxed);
 }
 
 void
