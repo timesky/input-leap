@@ -47,10 +47,6 @@
 #include <QDesktopServices>
 #include <QRegularExpression>
 
-#if defined(Q_OS_MAC)
-#include <ApplicationServices/ApplicationServices.h>
-#endif
-
 #if defined(Q_OS_WIN)
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -994,18 +990,12 @@ void MainWindow::setVisible(bool visible)
     ui_->m_pActionMinimize->setEnabled(visible);
     ui_->m_pActionRestore->setEnabled(!visible);
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070 // lion
-    // dock hide only supported on lion :(
-    ProcessSerialNumber psn = { 0, kCurrentProcess };
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    GetCurrentProcess(&psn);
-#pragma GCC diagnostic pop
-    if (visible)
-        TransformProcessType(&psn, kProcessTransformToForegroundApplication);
-    else
-        TransformProcessType(&psn, kProcessTransformToBackgroundApplication);
-#endif
+    // Do not transform the process type here.  TransformProcessType() has been
+    // deprecated since 10.11, and flipping between the foreground and
+    // background process types on every show/hide destroyed the status item:
+    // after hiding, the tray icon disappeared and never came back.  The
+    // application now keeps its Dock icon while the window is hidden, which
+    // also gives the user a second way to bring the window back.
 }
 
 QString MainWindow::getIPAddresses()
