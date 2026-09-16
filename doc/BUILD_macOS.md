@@ -149,6 +149,7 @@ cmake \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=x86_64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+  -DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk \
   -DCMAKE_PREFIX_PATH="$HOME/Qt-6.5.3/6.5.3/macos" \
   -DOPENSSL_ROOT_DIR=/usr/local/opt/openssl@3 \
   -DINPUTLEAP_BUILD_GUI=ON \
@@ -158,17 +159,130 @@ cmake \
 make -j$(sysctl -n hw.ncpu)
 ```
 
-> Intel 上 `CMAKE_OSX_SYSROOT` 一般不用指定（原生 SDK 就是 11.x，不会遇到 `library 'c++' not found`）。
+> ⚠️ **`CMAKE_OSX_SYSROOT` 必须设置**（见 3.4 的原因）。不设的话链接器拿不到 SDK 搜索路径，
+> 会报 `framework not found ApplicationServices` / `ScreenSaver` 等一连串错误。
+
+> Intel 上如果构建时报 `library 'c++' not found`，加 `-DCMAKE_OSX_SYSROOT=<SDK 路径>`。
 > 如果 CMake 找不到 OpenSSL，显式加 `-DOPENSSL_ROOT_DIR=/usr/local/opt/openssl@3`。
 
-### 3.3 CMake 选项说明
+### 3.3 Intel/Big Sur：服务端专用构建（推荐，绕开 GUI 链接问题）
+
+**为什么会有这条**：在 Big Sur 上做完整构建时，链接 GUI（`input-leap`）可能报错：
+
+```
+ld: framework not found ApplicationServices
+clang: error: linker command failed with exit code 1
+```
+
+而服务端的核心修复**全在 `input-leaps` / `input-leapc` 里，这两个程序不依赖 Qt、不需要 GUI**（GUI 只是启动器）。所以如果只需要修服务端，用下面的配置只构建这两个二进制，完全绕开这个问题：
+
+```bash
+mkdir -p build-x86_64 && cd build-x86_64
+
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -DCMAKE_PREFIX_PATH="$HOME/Qt-6.5.3/6.5.3/macos" -DOPENSSL_ROOT_DIR=/usr/local/opt/openssl@3 -DINPUTLEAP_BUILD_GUI=OFF -DINPUTLEAP_BUILD_TESTS=OFF ..
+
+# ⚠️ 只构建这两个目标，不要跑 make（all），否则仍会尝试链接 GUI
+make input-leaps input-leapc -j$(sysctl -n hw.ncpu)
+```
+
+自检：
+
+```bash
+lipo -archs bin/input-leapc                                                # 应为 x86_64
+otool -l bin/input-leapc | grep -A3 LC_BUILD_VERSION | grep minos          # 应为 11.0
+nm -C bin/input-leaps | grep -c ClientsDisconnectedWait                    # 应 > 0
+nm -C bin/input-leapc | grep updateActiveGroupCache                        # 应有输出
+```
+
+部署（服务端上，**只替换二进制，GUI 保持原来的不动**）：
+
+```bash
+sudo cp -R /Applications/InputLeap.app /Applications/InputLeap.app.bak
+sudo cp bin/input-leaps  /Applications/InputLeap.app/Contents/MacOS/
+sudo cp bin/input-leapc /Applications/InputLeap.app/Contents/MacOS/
+
+# 替换后签名失效，必须重签，否则进程被 SIGKILL（退出码 137）
+codesign --force --deep --sign - /Applications/InputLeap.app
+```
+
+然后按 5.2 重新授权辅助功能（二进制变了）。
+
+> 代价：服务端的 GUI 还是旧版，托盘图标在「隐藏」后会消失——纯外观问题，不影响服务端功能。
+
+### 3.4 Intel/Big Sur：`framework not found` 的根因与排查
+
+**根因**：Big Sur 上系统框架的**二进制都进了 dyld 共享缓存**，`/System/Library/Frameworks/` 下的框架目录是空壳（没有可链接的文件）。链接器必须靠 `-isysroot`/`--sysroot` 指到 SDK，用里面的 **`.tbd` 文本存根**来链接。
+
+`CMakeLists.txt` 会把 `--sysroot ${CMAKE_OSX_SYSROOT}` 塞进编译/链接参数——**如果 `CMAKE_OSX_SYSROOT` 没设置或取值不对，链接命令就没有有效的 SDK 路径**，于是任何一个系统框架都找不到。
+
+**症状**（判断标志：换一个构建目标，报错的框架名也跟着换）：
+
+```
+ld: framework not found ApplicationServices    ← 链接 GUI 时
+ld: framework not found ScreenSaver            ← 链接 input-leaps 时
+clang: error: linker command failed with exit code 1
+```
+
+**修复**：configure 时显式加（3.2 / 3.3 的命令里已包含）：
+
+```
+-DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+```
+
+验证三处指向同一个 SDK：
+
+```bash
+grep "CMAKE_OSX_SYSROOT" CMakeCache.txt
+grep -o "\-\-sysroot [^ ]*"  src/server/CMakeFiles/input-leaps.dir/link.txt
+grep -o "\-isysroot [^ ]*"   src/server/CMakeFiles/input-leaps.dir/link.txt
+```
+
+**仍然失败时**，按下面排查：
+
+```bash
+# 1. find_library 的解析结果（应为 SDK 内的完整路径，不能是 NOTFOUND）
+grep "APPSERVICES_LIB" build-x86_64/CMakeCache.txt
+
+# 2. SDK 里框架是否真的存在、有没有二进制 stub
+SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+ls "$SDK/System/Library/Frameworks/ApplicationServices.framework/Versions/A/"
+
+# 3. 看真实的链接命令，核对 -isysroot 指向的 SDK 与第 1 步是否一致
+make input-leap VERBOSE=1 2>&1 | tail -5
+```
+
+按顺序尝试：
+
+1. **显式指定 sysroot 重新 configure**，让 `find_library` 与链接器用同一个 SDK：
+
+   ```bash
+   cmake -DCMAKE_OSX_SYSROOT="$SDK" ... # 其余参数同 3.2，建议写单行
+   ```
+
+2. **换完整 Xcode 的 SDK**。Command Line Tools 自带的 SDK 是精简版， umbrealla 框架可能缺二进制 stub。装完整 Xcode 后：
+
+   ```bash
+   sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+   ```
+
+3. **确认三个关键参数都生效**（多行命令粘贴时反斜杠容易断行丢参数，建议写成单行）：
+
+   ```bash
+   grep -E "CMAKE_BUILD_TYPE|CMAKE_OSX_ARCHITECTURES|CMAKE_OSX_DEPLOYMENT_TARGET" CMakeCache.txt
+   # 期望：
+   # CMAKE_BUILD_TYPE:STRING=Release
+   # CMAKE_OSX_ARCHITECTURES:STRING=x86_64
+   # CMAKE_OSX_DEPLOYMENT_TARGET:STRING=11.0
+   ```
+
+### 3.5 CMake 选项说明
 
 | 选项 | 说明 |
 |---|---|
 | `CMAKE_BUILD_TYPE` | `Release` 才生成 dmg；`Debug` 只生成 bundle |
 | `CMAKE_OSX_ARCHITECTURES` | `arm64` / `x86_64` / `x86_64;arm64` |
 | `CMAKE_OSX_DEPLOYMENT_TARGET` | **必设**。不设的话产物 `minos` 会等于当前 SDK 版本（如 15.4），目标机器跑不了。Big Sur 填 `11.0` |
-| `CMAKE_OSX_SYSROOT` | 遇到 `library 'c++' not found` 时指向 `MacOSX15.sdk` |
+| `CMAKE_OSX_SYSROOT` | **必设**。指向 SDK（如 `MacOSX.sdk`）；不设会导致链接期 `framework not found`（见 3.4） |
 | `CMAKE_PREFIX_PATH` | Qt 安装路径（`<Qt>/<版本>/macos`） |
 | `OPENSSL_ROOT_DIR` | Intel Homebrew 上可能需要显式指定 |
 | `INPUTLEAP_BUILD_GUI` | 打包含 GUI 时保持 `ON` |
@@ -425,7 +539,8 @@ nc -z -v <服务端IP> 24801
 | 授权过了、签名也没问题但还是打不开 | 重新编译导致签名变化、授权失效 | 见 5.3，辅助功能列表里删掉再重新添加 |
 | 连不上服务端 | 先确认 App 真的起来了（`pgrep`）；再确认客户端里填的服务端 IP/端口 | `lsof -nP -iTCP:<端口>`；`nc -z -v <服务端IP> <端口>` |
 | dmg 里混进了 `unittests` 等 | 没关测试 | 构建时加 `-DINPUTLEAP_BUILD_TESTS=OFF` |
-| 构建报 `library 'c++' not found` | 新 SDK 问题 | 加 `-DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk` |
+| 链接报 `framework not found ApplicationServices/ScreenSaver/...` | 链接命令缺有效 sysroot，Big Sur 上系统框架没有可链接的二进制 | configure 加 `-DCMAKE_OSX_SYSROOT=<SDK 路径>`（见 3.4）；判断标志：换个目标就换个框架名 |
+| 构建报 `library 'c++' not found` | 新 SDK 问题 | 加 `-DCMAKE_OSX_SYSROOT=<SDK 路径>` |
 | CMake 找不到 Qt | 路径不对 | `-DCMAKE_PREFIX_PATH="<Qt>/<版本>/macos"` |
 | 产物在旧系统上跑不起来 | 没设 deployment target | 加 `-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0` 并重新构建 |
 | Big Sur 上 GUI 起不来 | Qt 版本 ≥ 6.6 | 换 Qt 6.5.x（见 1.1） |
